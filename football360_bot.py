@@ -1,60 +1,124 @@
-import logging
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
-
-BOT_TOKEN = "8744795446:AAFg-dxLgWnu-ajqZcsIAN75R98ycoNFrSo"
-
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
+import csv
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    MessageHandler,
+    filters,
+    ContextTypes,
+    ConversationHandler,
+    CallbackQueryHandler
 )
 
-subscribers = []
-ads_orders = []  # сюда будут складываться рекламные заказы
+# ---------------------------
+# Настройки
+# ---------------------------
+BOT_TOKEN = "8744795446:AAE3pLgok4r-9jMHxd71ss45c2KNsHzxi-w"
+ADMIN_ID = 7785582925
+ORDERS_FILE = "orders.csv"
+# ---------------------------
 
-# Подписка на рассылку
+# Шаги диалога
+NAME, LINK, AD_TYPE, DATE, TG = range(5)
+user_data_dict = {}
+
+# ---------------------------
+# Команды
+# ---------------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.message.from_user.id
-    if user_id not in subscribers:
-        subscribers.append(user_id)
-    await update.message.reply_text("Вы подписались на рассылку рекламы!")
+    await update.message.reply_text(
+        "⚽ Добро пожаловать в Football 360°!\n"
+        "🔥 Здесь вы можете заказать рекламу в нашем канале.\n\n"
+        "Введите ваше имя:"
+    )
+    return NAME
 
-# Получение рекламного заказа
-async def send_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text
-    ads_orders.append(text)  # сохраняем заказ
-    await update.message.reply_text("Ваш рекламный заказ принят!")
+async def get_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    user_data_dict[chat_id] = {'name': update.message.text}
+    await update.message.reply_text("Введите ссылку на ваш канал или группу:")
+    return LINK
 
-# Рассылка выбранной рекламы (только для админа)
-async def send_ad(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    admin_id = 123456789  # замените на свой ID
-    if update.message.from_user.id != admin_id:
-        await update.message.reply_text("Ты не админ!")
-        return
+async def get_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    user_data_dict[chat_id]['link'] = update.message.text
 
-    if not ads_orders:
-        await update.message.reply_text("Нет заказов для рассылки.")
-        return
+    keyboard = [
+        [InlineKeyboardButton("Пост", callback_data="Пост")],
+        [InlineKeyboardButton("Упоминание", callback_data="Упоминание")],
+        [InlineKeyboardButton("Подборка", callback_data="Подборка")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text("Выберите тип рекламы:", reply_markup=reply_markup)
+    return AD_TYPE
 
-    # Отправляем все заказы подписчикам
-    for ad in ads_orders:
-        for user_id in subscribers:
-            try:
-                await context.bot.send_message(chat_id=user_id, text=ad)
-            except Exception as e:
-                logging.error(f"Не удалось отправить пользователю {user_id}: {e}")
-    await update.message.reply_text("Все рекламные заказы отправлены!")
-    ads_orders.clear()  # очищаем после рассылки
+async def get_ad_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    chat_id = query.message.chat.id
+    user_data_dict[chat_id]['ad_type'] = query.data
+    await query.message.reply_text("Введите дату публикации (ДД.MM.ГГГГ):")
+    return DATE
 
-# Главная функция
+async def get_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    user_data_dict[chat_id]['date'] = update.message.text
+    await update.message.reply_text("Введите ваш Telegram (например @username):")
+    return TG
+
+async def get_tg(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    user_data_dict[chat_id]['tg'] = update.message.text
+    data = user_data_dict[chat_id]
+
+    prices = {"Пост": 10, "Упоминание": 5, "Подборка": 15}
+    price = prices.get(data['ad_type'], 0)
+    data['price'] = price
+
+    with open(ORDERS_FILE, "a", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow([data['name'], data['link'], data['ad_type'], data['date'], data['tg'], price])
+
+    await update.message.reply_text(
+        f"✅ Ваша заявка принята!\nСтоимость: {price}$\nМы свяжемся с вами."
+    )
+
+    await context.bot.send_message(
+        chat_id=ADMIN_ID,
+        text=f"💌 Новая заявка на рекламу!\n"
+             f"👤 Имя: {data['name']}\n"
+             f"🔗 Ссылка: {data['link']}\n"
+             f"📅 Дата: {data['date']}\n"
+             f"💰 Тип: {data['ad_type']}\n"
+             f"Telegram: {data['tg']}\n"
+             f"Цена: {price}$"
+    )
+    return ConversationHandler.END
+
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("❌ Заявка отменена.")
+    return ConversationHandler.END
+
+# ---------------------------
+# Основной запуск
+# ---------------------------
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, send_order))  # все тексты считаем заказами
-    app.add_handler(CommandHandler("send_ad", send_ad))
+    conv_handler = ConversationHandler(
+        entry_points=[CommandHandler('start', start)],
+        states={
+            NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_name)],
+            LINK: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_link)],
+            AD_TYPE: [CallbackQueryHandler(get_ad_type)],
+            DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_date)],
+            TG: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_tg)],
+        },
+        fallbacks=[CommandHandler('cancel', cancel)]
+    )
 
-    print("⚡ Бот для рекламы с приёмом заказов запущен...")
+    app.add_handler(conv_handler)
+    print("⚡ Бот Football 360° запущен...")
     app.run_polling()
 
 if __name__ == "__main__":
