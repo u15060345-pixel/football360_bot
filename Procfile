@@ -1,0 +1,1 @@
+worker: python football360_bot.py
