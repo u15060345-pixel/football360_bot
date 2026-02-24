@@ -13,7 +13,7 @@ from telegram.ext import (
 # ---------------------------
 # Настройки
 # ---------------------------
-BOT_TOKEN = "8744795446:AAE3pLgok4r-9jMHxd71ss45c2KNsHzxi-w"
+BOT_TOKEN = "8744795446:AAFg-dxLgWnu-ajqZcsIAN75R98ycoNFrSo"
 ADMIN_ID = 7785582925
 ORDERS_FILE = "orders.csv"
 # ---------------------------
@@ -123,3 +123,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
